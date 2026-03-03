@@ -1,5 +1,7 @@
 import fs from 'fs/promises';
+import fssync from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { glob } from 'glob';
 
 /**
@@ -8,10 +10,47 @@ import { glob } from 'glob';
  */
 
 export class ClawTextIngest {
-  constructor(memoryDir = null) {
+  constructor(memoryDir = null, hashFile = null) {
     this.memoryDir = memoryDir || path.join(process.env.HOME, '.openclaw/workspace/memory');
+    this.hashFile = hashFile || path.join(this.memoryDir, '.ingest_hashes.json');
     this.importedCount = 0;
+    this.skippedCount = 0;
     this.errors = [];
+    this.hashes = this.loadHashes();
+  }
+
+  /**
+   * Load existing content hashes to enable deduplication
+   */
+  loadHashes() {
+    try {
+      if (fssync.existsSync(this.hashFile)) {
+        return JSON.parse(fssync.readFileSync(this.hashFile, 'utf-8'));
+      }
+    } catch (err) {
+      console.warn('Failed to load hashes:', err.message);
+    }
+    return {};
+  }
+
+  /**
+   * Save content hashes to file
+   */
+  saveHashes() {
+    try {
+      fssync.mkdirSync(this.memoryDir, { recursive: true });
+      fssync.writeFileSync(this.hashFile, JSON.stringify(this.hashes, null, 2));
+    } catch (err) {
+      console.error('Failed to save hashes:', err.message);
+    }
+  }
+
+  /**
+   * Check if content already ingested (by SHA1 hash)
+   */
+  isDuplicate(content) {
+    const hash = crypto.createHash('sha1').update(content).digest('hex');
+    return { isDup: this.hashes[hash] !== undefined, hash };
   }
 
   /**
@@ -48,7 +87,7 @@ export class ClawTextIngest {
   }
 
   /**
-   * Ingest from file glob patterns
+   * Ingest from file glob patterns with deduplication
    */
   async fromFiles(patterns, metadata = {}) {
     const patterns_ = Array.isArray(patterns) ? patterns : [patterns];
@@ -60,6 +99,13 @@ export class ClawTextIngest {
       for (const file of files) {
         try {
           const content = await fs.readFile(file, 'utf-8');
+          const { isDup, hash } = this.isDuplicate(content);
+
+          if (isDup) {
+            this.skippedCount++;
+            continue;
+          }
+
           const fileName = path.basename(file);
           const sourceDate = metadata.date || new Date().toISOString().split('T')[0];
           
@@ -72,6 +118,7 @@ export class ClawTextIngest {
           const outFile = path.join(this.memoryDir, `ingested-files-${sourceDate}.md`);
           await fs.appendFile(outFile, `\n## ${fileName}\n\n${memory}\n\n---\n\n`);
           
+          this.hashes[hash] = { file, date: sourceDate };
           imported++;
         } catch (err) {
           this.errors.push({ file, error: err.message });
@@ -80,7 +127,7 @@ export class ClawTextIngest {
     }
 
     this.importedCount += imported;
-    return { imported, errors: this.errors };
+    return { imported, skipped: this.skippedCount, errors: this.errors };
   }
 
   /**
@@ -115,12 +162,12 @@ export class ClawTextIngest {
   }
 
   /**
-   * Ingest from JSON data (e.g., chat exports, API responses)
+   * Ingest from JSON data with deduplication
    */
   async fromJSON(data, metadata = {}, options = {}) {
     const {
-      keyMap = {},        // { contentKey: 'message', dateKey: 'timestamp', authorKey: 'user' }
-      transform = null    // Function to transform each item
+      keyMap = {},
+      transform = null
     } = options;
 
     const items = Array.isArray(data) ? data : [data];
@@ -129,6 +176,13 @@ export class ClawTextIngest {
     for (const item of items) {
       try {
         const content = item[keyMap.contentKey] || JSON.stringify(item);
+        const { isDup, hash } = this.isDuplicate(content);
+
+        if (isDup) {
+          this.skippedCount++;
+          continue;
+        }
+
         const itemDate = item[keyMap.dateKey]?.split('T')[0] || metadata.date;
         const author = item[keyMap.authorKey] || 'unknown';
 
@@ -144,6 +198,7 @@ export class ClawTextIngest {
         const outFile = path.join(this.memoryDir, `ingested-json-${itemDate}.md`);
         await fs.appendFile(outFile, `\n${entry}\n\n---\n\n`);
         
+        this.hashes[hash] = { source: 'json', date: itemDate };
         imported++;
       } catch (err) {
         this.errors.push({ item, error: err.message });
@@ -151,7 +206,7 @@ export class ClawTextIngest {
     }
 
     this.importedCount += imported;
-    return { imported, errors: this.errors };
+    return { imported, skipped: this.skippedCount, errors: this.errors };
   }
 
   /**
@@ -159,22 +214,31 @@ export class ClawTextIngest {
    */
   async fromText(text, metadata = {}) {
     try {
+      const { isDup, hash } = this.isDuplicate(text);
+
+      if (isDup) {
+        this.skippedCount++;
+        return { imported: 0, skipped: 1, errors: [] };
+      }
+
+      fssync.mkdirSync(this.memoryDir, { recursive: true });
       const memory = this.generateFrontmatter(metadata) + text;
       const fileName = metadata.filename || `ingested-text-${new Date().toISOString().split('T')[0]}.md`;
       const outFile = path.join(this.memoryDir, fileName);
       
       await fs.appendFile(outFile, `\n${memory}\n\n---\n\n`);
+      this.hashes[hash] = { type: 'text', date: metadata.date || new Date().toISOString().split('T')[0] };
       this.importedCount += 1;
-      return { imported: 1, errors: [] };
+      return { imported: 1, skipped: 0, errors: [] };
     } catch (err) {
       const error = { text: text.substring(0, 50), error: err.message };
       this.errors.push(error);
-      return { imported: 0, errors: [error] };
+      return { imported: 0, skipped: 0, errors: [error] };
     }
   }
 
   /**
-   * Batch ingest from multiple sources
+   * Batch ingest from multiple sources with deduplication
    */
   async ingestAll(sources) {
     const results = [];
@@ -203,8 +267,12 @@ export class ClawTextIngest {
       results.push({ type, result });
     }
 
+    // Persist all hashes after ingest completes
+    this.saveHashes();
+
     return {
       totalImported: this.importedCount,
+      totalSkipped: this.skippedCount,
       results,
       errors: this.errors
     };
@@ -233,10 +301,20 @@ export class ClawTextIngest {
   getReport() {
     return {
       totalImported: this.importedCount,
+      totalSkipped: this.skippedCount,
       errorCount: this.errors.length,
       errors: this.errors,
-      memoryDir: this.memoryDir
+      memoryDir: this.memoryDir,
+      dedupeHashes: Object.keys(this.hashes).length
     };
+  }
+
+  /**
+   * Persist hashes to disk after ingest
+   */
+  async commit() {
+    this.saveHashes();
+    return this.getReport();
   }
 }
 
