@@ -89,8 +89,9 @@ export class ClawTextIngest {
   /**
    * Ingest from file glob patterns with deduplication
    */
-  async fromFiles(patterns, metadata = {}) {
+  async fromFiles(patterns, metadata = {}, options = {}) {
     const patterns_ = Array.isArray(patterns) ? patterns : [patterns];
+    const { checkDedupe = true } = options;
     let imported = 0;
 
     for (const pattern of patterns_) {
@@ -99,11 +100,13 @@ export class ClawTextIngest {
       for (const file of files) {
         try {
           const content = await fs.readFile(file, 'utf-8');
-          const { isDup, hash } = this.isDuplicate(content);
-
-          if (isDup) {
-            this.skippedCount++;
-            continue;
+          
+          if (checkDedupe) {
+            const { isDup, hash } = this.isDuplicate(content);
+            if (isDup) {
+              this.skippedCount++;
+              continue;
+            }
           }
 
           const fileName = path.basename(file);
@@ -118,6 +121,7 @@ export class ClawTextIngest {
           const outFile = path.join(this.memoryDir, `ingested-files-${sourceDate}.md`);
           await fs.appendFile(outFile, `\n## ${fileName}\n\n${memory}\n\n---\n\n`);
           
+          const { hash } = this.isDuplicate(content);
           this.hashes[hash] = { file, date: sourceDate };
           imported++;
         } catch (err) {
