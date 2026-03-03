@@ -1,3 +1,8 @@
+---
+name: ClawText Ingest
+description: Multi-source memory ingestion with automatic deduplication and YAML headers
+---
+
 # ClawText Ingest — Skill Definition
 
 **Name:** clawtext-ingest  
