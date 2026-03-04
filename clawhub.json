@@ -2,7 +2,7 @@
   "name": "clawtext-ingest",
   "version": "1.2.0",
   "title": "ClawText Ingest — Multi-Source Memory Ingestion",
-  "description": "Lightweight data ingestion tool for OpenClaw agents. Import files, URLs, JSON exports, and raw text into structured memory with automatic YAML headers, SHA1 deduplication, and ClawText cluster integration.",
+  "description": "Lightweight data ingestion tool for OpenClaw agents. Import files, URLs, JSON exports, and raw text into structured memory with automatic YAML headers, SHA1 deduplication, and ClawText cluster integration. Includes CLI tool and Node.js API.",
   "author": "ragesaq",
   "license": "MIT",
   "repository": "https://github.com/ragesaq/clawtext-ingest",
@@ -21,37 +21,60 @@
     "knowledge",
     "clustering",
     "data-import",
-    "agent-tools"
+    "agent-tools",
+    "cli",
+    "discord-import"
   ],
   "features": [
     "Multi-source ingestion (files, URLs, JSON, text)",
+    "Command-line tool (CLI) for easy ingestion",
+    "Node.js API for programmatic use",
     "Automatic YAML frontmatter generation",
     "SHA1-based deduplication for idempotency",
     "Entity extraction and indexing",
     "ClawText cluster integration",
     "Batch processing support",
-    "Flexible dedup controls"
+    "Flexible dedup controls",
+    "Discord/Slack chat export support"
   ],
+  "bin": {
+    "clawtext-ingest": "bin/ingest.js"
+  },
   "peerDependencies": {
     "clawtext": ">=1.0.0"
   },
+  "installation": {
+    "npm": "npm install clawtext-ingest",
+    "openclaw": "openclaw install clawtext-ingest"
+  },
+  "usage": {
+    "cli": "clawtext-ingest ingest-files --input='docs/*.md' --project='docs'",
+    "nodejs": "import { ClawTextIngest } from 'clawtext-ingest'; const ingest = new ClawTextIngest(); await ingest.fromFiles(['*.md'], { project: 'docs' });"
+  },
   "documentation": {
     "quick_start": "https://github.com/ragesaq/clawtext-ingest#quick-start",
-    "api": "https://github.com/ragesaq/clawtext-ingest#api",
-    "examples": "https://github.com/ragesaq/clawtext-ingest#examples",
+    "cli": "https://github.com/ragesaq/clawtext-ingest#quick-start--cli",
+    "api": "https://github.com/ragesaq/clawtext-ingest#api-reference",
+    "examples": "https://github.com/ragesaq/clawtext-ingest#example-1-ingest-discord-export",
     "troubleshooting": "https://github.com/ragesaq/clawtext-ingest#troubleshooting"
   },
   "relatedSkills": [
     "clawtext"
   ],
+  "companion_tools": {
+    "clawtext": "RAG layer that processes ingested memories for automatic context injection"
+  },
   "tags": [
     "production-ready",
     "v1.2.0",
     "tested",
     "deduplication",
-    "multi-source"
+    "multi-source",
+    "cli-tool",
+    "agent-framework"
   ],
   "tested": true,
   "maintained": true,
   "author_contact": "https://github.com/ragesaq"
 }
+

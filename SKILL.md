@@ -53,7 +53,58 @@ console.log(`Imported: ${result.totalImported}, Skipped: ${result.totalSkipped}`
 
 ## API
 
-### Constructor
+### CLI
+
+Use the command-line tool for easy one-off ingestion tasks:
+
+```bash
+# Ingest files matching glob pattern
+clawtext-ingest ingest-files --input="docs/*.md" --project="docs"
+
+# Ingest URLs
+clawtext-ingest ingest-urls --input="https://example.com/page" --project="research"
+
+# Ingest JSON (Discord export, API response, etc.)
+clawtext-ingest ingest-json --input=messages.json --source="discord" --type="discord-thread"
+
+# Ingest raw text
+clawtext-ingest ingest-text --input="Key finding: X is better than Y" --project="findings"
+
+# Batch ingest from configuration file
+clawtext-ingest batch --config=sources.json
+
+# Rebuild clusters after ingestion
+clawtext-ingest rebuild
+
+# Show status
+clawtext-ingest status
+
+# Get help
+clawtext-ingest help
+```
+
+**CLI Options:**
+- `--input, -i` — Input file/URL/JSON/text (required)
+- `--type, -t` — Input type (files, urls, json, text)
+- `--output, -o` — Output memory directory (default: ~/.openclaw/workspace/memory)
+- `--project, -p` — Project name for metadata
+- `--source, -s` — Source identifier (discord, github, slack, etc.)
+- `--date, -d` — Date override (YYYY-MM-DD)
+- `--no-dedupe` — Skip deduplication checks (faster, risky)
+- `--verbose, -v` — Detailed output
+- `--help, -h` — Show help
+
+### Node.js API
+
+Import and use the `ClawTextIngest` class directly:
+
+```javascript
+import { ClawTextIngest } from 'clawtext-ingest';
+
+const ingest = new ClawTextIngest(memoryDir, hashFile);
+```
+
+
 ```javascript
 new ClawTextIngest(memoryDir, hashFile)
 ```
