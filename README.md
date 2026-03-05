@@ -1,366 +1,345 @@
-# ClawText Ingest
+# ClawText-Ingest
 
-Version: 1.3.0
+**Version:** 1.3.0 | **Status:** Production — Active
 
-Convert multi-source data (files, URLs, JSON, text, **Discord**) into structured memory for the **ClawText** RAG layer. Automatically generates YAML headers and prevents duplicate ingestion via SHA1 hashing. Works with ClawText to enable automatic context injection into agent prompts.
+Multi-source ingestion library for the ClawText RAG system. Fetches messages from Discord (forums, channels, threads), filters text-only content, deduplicates via SHA1, and writes structured markdown cluster files that ClawText indexes for automatic context injection.
 
-## Why this matters
+---
 
-**Without ClawText Ingest:** Manual memory management, duplicate entries, no structured metadata, context loss.
+## What It Does
 
-**With ClawText Ingest + ClawText:**
-- Knowledge acquired in real time: new docs → instant memory injection
-- Smart deduplication: same info ingested 10x? Only stored once.
-- Automatic context: models answer questions with relevant background without prompting
-- Measurable improvement: models that remember past decisions make 20-35% better choices on related tasks
+ClawText-Ingest is the data pipeline half of the ClawText system. It:
 
-Example: Ingest 5 recent design decision docs → next agent working on architecture automatically gets relevant context → avoids contradicting prior decisions → fewer iterations.
+1. **Fetches** — Pulls messages from Discord via bot API (handles pagination, rate limits)
+2. **Filters** — Text-only: strips attachments and embeds, skips empty messages
+3. **Deduplicates** — SHA1 hash per message; already-seen messages are silently skipped
+4. **Writes** — Per-thread markdown files with YAML frontmatter to `~/memory/clusters/`
+5. **Triggers rebuild** — Calls `build-clusters.js` to refresh the RAG search index
 
-## ✨ New: Discord Integration
+Safe to run repeatedly. Running the same ingest 100 times produces the same result.
 
-ClawText-Ingest now supports direct Discord message ingestion with:
-- **Forum hierarchy** — Post↔reply structure preserved in metadata
-- **Auto-batch mode** — <500 posts: instant, ≥500 posts: streaming
-- **Real-time progress** — Visual feedback during large ingestions
-- **One-command setup** — No code required, pure CLI
-- **Autonomous agents** — Programmatic API for agent workflows
+---
 
-### Quick Discord Start
+## How It Fits Into the Pipeline
 
-```bash
-# 1. Set up Discord bot (5 minutes)
-# See DISCORD_BOT_SETUP.md for step-by-step
-
-# 2. Inspect forum
-clawtext-ingest-discord describe-forum --forum-id 123456789
-
-# 3. Ingest with progress
-DISCORD_TOKEN=xxx clawtext-ingest-discord fetch-discord --forum-id 123456789
-
-# 4. Rebuild clusters
-clawtext-ingest rebuild
 ```
-
-**Output:**
+ Discord Forums & Channels
+         │
+         ▼
+ ┌───────────────────────┐
+ │   ingest-all.mjs      │  Master script — runs all sources
+ │   (uses this library) │  Nightly cron: 3 AM
+ └──────────┬────────────┘
+            │
+            ▼
+ ┌───────────────────────┐
+ │   ~/memory/clusters/  │  Per-thread .md files with YAML headers
+ │   *.md                │  ~9,000+ messages across 56+ threads
+ └──────────┬────────────┘
+            │
+            ▼
+ ┌───────────────────────┐
+ │   build-clusters.js   │  Chunks all .md files → _index.json
+ │   (cron: */30 min)    │  5,879 searchable chunks
+ └──────────┬────────────┘
+            │
+            ▼
+ ┌───────────────────────┐
+ │   ClawText RAG        │  BM25 search on every prompt
+ │   before_prompt_build │  Injects relevant context automatically
+ └───────────────────────┘
 ```
-[████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 25% | 462/1850 | 12.3s | Batch 3
-✅ Complete in 45.23s | 1850 messages fetched | 3 deduplicated
-```
-
-See [PHASE2_CLI_GUIDE.md](./PHASE2_CLI_GUIDE.md) for complete Discord reference.
 
 ---
 
 ## Installation
 
-### From NPM (once published to ClawhHub)
 ```bash
-npm install clawtext-ingest
-# or
-openclaw install clawtext-ingest
-```
+# Already bundled with OpenClaw workspace at:
+~/.openclaw/workspace/skills/clawtext-ingest/
 
-### From Source (development)
-```bash
-cd ~/.openclaw/workspace/skills/clawtext-ingest
+# Or clone separately:
+git clone https://github.com/ragesaq/clawtext-ingest.git
+cd clawtext-ingest
 npm install
 ```
 
-## Quick Start — CLI
+No separate Discord token setup required — uses the token stored by OpenClaw at  
+`~/.openclaw/credentials/discord.token.json`.
 
-### Classic Ingestion (Files, URLs, JSON, Text)
+---
 
-```bash
-# Ingest markdown files
-clawtext-ingest ingest-files --input="docs/*.md" --project="docs"
+## Making Ingestion Automatic
 
-# Ingest from URLs
-clawtext-ingest ingest-urls --input="https://example.com/page" --project="research"
+The recommended approach is the master ingest script with crons. No manual steps after initial setup.
 
-# Ingest JSON (Discord export, API response, etc.)
-clawtext-ingest ingest-json --input=messages.json --source="discord"
+### Step 1 — Configure Sources
 
-# Ingest raw text
-clawtext-ingest ingest-text --input="Key finding: X is better than Y" --project="findings"
-
-# Batch ingest from config file
-clawtext-ingest batch --config=sources.json
-
-# Show status
-clawtext-ingest status
-
-# Rebuild clusters after ingestion
-clawtext-ingest rebuild
-```
-
-### Discord Ingestion (New)
-
-```bash
-# Lightweight inspection (no fetch)
-clawtext-ingest-discord describe-forum --forum-id FORUM_ID --verbose
-
-# Fetch & ingest (full process)
-DISCORD_TOKEN=xxx clawtext-ingest-discord fetch-discord --forum-id FORUM_ID
-
-# With options
-DISCORD_TOKEN=xxx clawtext-ingest-discord fetch-discord \
-  --forum-id FORUM_ID \
-  --batch-size 100 \
-  --concurrency 5 \
-  --verbose
-```
-
-### CLI Options
-```
---input, -i          Input file/URL/JSON/text
---type, -t           Input type (files, urls, json, text)
---output, -o         Output memory dir (default: ~/.openclaw/workspace/memory)
---project, -p        Project name for metadata
---source, -s         Source identifier (discord, github, etc.)
---date, -d           Override date (YYYY-MM-DD)
---no-dedupe          Skip deduplication (faster, risky)
---verbose, -v        Detailed output
-
-# Discord-specific
---forum-id ID        Discord forum ID
---channel-id ID      Discord channel ID
---thread-id ID       Discord thread ID
---batch-size N       Messages per batch (default: 50)
---concurrency N      Parallel requests (default: 3)
---mode MODE          full|batch|posts-only
-```
-
-## Quick Start — Node API
-
-For agents and programmatic use:
+Edit `~/.openclaw/workspace/scripts/ingest-all.mjs` and set your channels:
 
 ```javascript
-import { ClawTextIngest } from 'clawtext-ingest';
+const SOURCES = [
+  // Forum channels (have threads — each thread becomes a cluster file)
+  { id: '1476018965284261908', type: 'forum', name: 'rgcs-dev' },
+  { id: '1475021817168134144', type: 'forum', name: 'ai-projects' },
+  { id: '1477543809905721365', type: 'forum', name: 'moltmud-projects' },
+
+  // Regular channels (ingested as single cluster file)
+  { id: '1474997928056590339', type: 'channel', name: 'general' },
+  { id: '1475019186563448852', type: 'channel', name: 'status' },
+];
+```
+
+### Step 2 — Run Initial Ingest
+
+```bash
+node ~/.openclaw/workspace/scripts/ingest-all.mjs
+```
+
+This fetches everything available today. Output:
+
+```
+═══════════════════════════════════════════════
+✅ ingest-all COMPLETE  (87.3s)
+═══════════════════════════════════════════════
+  Sources:   5
+  Threads:   56
+  Fetched:   9,105
+  Imported:  8,968
+  Skipped:   137 (dupes)
+═══════════════════════════════════════════════
+```
+
+### Step 3 — Wire the Crons
+
+```bash
+crontab -e
+```
+
+Add:
+
+```cron
+# Rebuild RAG chunk index every 30 min (picks up session extractions)
+*/30 * * * * /usr/bin/node ~/.openclaw/workspace/hooks/build-clusters.js \
+  >> ~/memory/.cluster-rebuild.log 2>&1
+
+# Full Discord re-ingest nightly at 3 AM (only new messages ingested)
+0 3 * * * /usr/bin/node ~/.openclaw/workspace/scripts/ingest-all.mjs \
+  >> ~/memory/.ingest-nightly.log 2>&1
+```
+
+That's it. Memory now grows automatically.
+
+---
+
+## Programmatic API
+
+For custom ingestion workflows or agent-driven tasks:
+
+```javascript
+import { ClawTextIngest } from '~/.openclaw/workspace/skills/clawtext-ingest/src/index.js';
 
 const ingest = new ClawTextIngest();
 
-// Ingest docs (duplicates auto-skipped)
-await ingest.fromFiles(['docs/**/*.md'], { project: 'docs', type: 'fact' });
+// Ingest an array of message objects
+await ingest.fromJSON(messages, { checkDedupe: true });
 
-// Ingest chat export
-await ingest.fromJSON(chatArray, { project: 'team' }, {
-  keyMap: { contentKey: 'message', dateKey: 'timestamp', authorKey: 'user' }
-});
-
-// Run batch
-const result = await ingest.ingestAll([...sources]);
-console.log(`Imported: ${result.totalImported}, Skipped: ${result.totalSkipped}`);
-
-// Rebuild ClawText clusters
-await ingest.rebuildClusters();
+console.log(`Imported: ${ingest.importedCount}`);
+console.log(`Skipped:  ${ingest.skippedCount}`);
 ```
 
-### Autonomous Discord Ingestion (Agent Example)
+### fromJSON(messages, options)
 
 ```javascript
-import { DiscordIngestionRunner } from 'clawtext-ingest/src/agent-runner.js';
-import ClawTextIngest from 'clawtext-ingest';
-
-const ingest = new ClawTextIngest();
-const runner = new DiscordIngestionRunner(ingest);
-
-const result = await runner.ingestForumAutonomous({
-  forumId: '123456789',
-  mode: 'batch',
-  token: process.env.DISCORD_TOKEN,
-  onProgress: (progress) => console.log(`${progress.percent}%...`)
-});
-
-console.log(`Ingested: ${result.summary.ingestedMessages} messages`);
-```
-
-See [AGENT_GUIDE.md](./AGENT_GUIDE.md) for more agent patterns.
-
-## API Reference
-
-### Methods
-
-**`fromFiles(patterns, metadata, options)`**
-- Ingest files matching glob patterns
-- Auto-deduplication by SHA1
-- Example: `await ingest.fromFiles(['docs/**/*.md'], { project: 'docs' })`
-
-**`fromJSON(data, metadata, options)`**
-- Ingest JSON arrays or objects
-- `options.keyMap`: { contentKey, dateKey, authorKey }
-- Skips duplicates by content hash
-- Example: Discord exports, API responses
-
-**`fromUrls(urls, metadata)`**
-- Fetch and ingest URLs
-- Single URL or comma-separated list
-- Example: `await ingest.fromUrls('https://example.com/page')`
-
-**`fromText(text, metadata)`**
-- Ingest raw content
-- Auto-dedup by hash
-- Example: `await ingest.fromText('Finding: X is better than Y')`
-
-**`ingestAll(sources)`**
-- Batch multi-source ingestion
-- Returns: `{ totalImported, totalSkipped, results, errors }`
-
-**`rebuildClusters()`**
-- Signal ClawText to rebuild memory clusters
-- Call after batch ingestion
-
-**`getReport()`**
-- Current ingestion stats
-
-**`commit()`**
-- Persist hashes to disk
-
-### Metadata Fields
-
-```javascript
-{
-  date: '2026-03-04',           // Auto-filled if not provided
-  project: 'myproject',         // Grouping for ClawText routing
-  type: 'fact',                 // Categorization (decision, finding, etc.)
-  source: 'discord',            // Source identifier
-  entities: ['user1', 'team'],  // Related entities
-  keywords: ['tag1', 'tag2']    // Search keywords
-}
-```
-
-## Integration with ClawText
-
-1. **Ingest** source data using ClawTextIngest
-2. **Rebuild** clusters: `clawtext-ingest rebuild` or `await ingest.rebuildClusters()`
-3. **ClawText** auto-detects new memories in memory directory
-4. **On next prompt:** relevant memories injected automatically
-5. **Agent/model** answers with full context
-
-See: [ClawText README](https://github.com/ragesaq/clawtext) for RAG layer details.
-
-## Deduplication
-
-SHA1 hashes stored in `.ingest_hashes.json`. Run same ingestion 100 times → zero duplicates. Safe for repeated agent workflows.
-
-**Skip dedup (not recommended):**
-```bash
-clawtext-ingest ingest-files --input="*.md" --no-dedupe
-```
-
-## Examples
-
-### Example 1: Ingest Discord Forum
-
-```bash
-# Inspect first
-clawtext-ingest-discord describe-forum --forum-id 123456789 --verbose
-
-# Ingest
-DISCORD_TOKEN=xxx clawtext-ingest-discord fetch-discord --forum-id 123456789
-
-# Rebuild
-clawtext-ingest rebuild
-```
-
-Or programmatically:
-```javascript
-import { DiscordIngestionRunner } from 'clawtext-ingest/src/agent-runner.js';
-import ClawTextIngest from 'clawtext-ingest';
-
-const runner = new DiscordIngestionRunner(new ClawTextIngest());
-await runner.ingestForumAutonomous({
-  forumId: '123456789',
-  mode: 'batch',
-  token: process.env.DISCORD_TOKEN
-});
-```
-
-### Example 2: Multi-Source Batch
-
-```javascript
-const result = await ingest.ingestAll([
-  { 
-    type: 'files', 
-    data: ['docs/**/*.md'], 
-    metadata: { project: 'docs' } 
-  },
-  { 
-    type: 'urls', 
-    data: ['https://docs.example.com/api'], 
-    metadata: { project: 'api-docs' } 
-  },
-  { 
-    type: 'json', 
-    data: chatExport, 
-    metadata: { project: 'team', source: 'discord' } 
+const messages = [
+  {
+    content: "The smoothing algorithm was updated in v1.2.324",
+    author: "ragesaq",
+    timestamp: "2026-03-05T06:00:00Z",
+    channel: "rgcs-dev",
+    source: "Discord"
   }
-]);
+];
 
-console.log(result);
-// { totalImported: 245, totalSkipped: 12, results: [...], errors: [] }
+await ingest.fromJSON(messages, {
+  checkDedupe: true,   // Skip already-seen messages (default: true)
+  outputDir: '/home/lumadmin/memory/clusters',
+  tags: ['rgcs', 'development']
+});
 ```
 
-### Example 3: Scheduled Agent Task
+### Message Object Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `content` | ✅ | Message text (empty messages skipped) |
+| `author` | — | Author username |
+| `timestamp` | — | ISO 8601 timestamp |
+| `channel` | — | Source channel name |
+| `source` | — | Source identifier |
+
+### Deduplication
+
+SHA1 hashes stored in `~/memory/.ingest_hashes.json`. The hash is computed from:
+`sha1("${channelId}:${messageId}:${content}")`
+
+This means:
+- Same message re-ingested → skipped
+- Same text in different channel → treated as new (safe)
+- Editing a message → treated as new (safe)
+
+To reset deduplication (force full re-ingest):
+```bash
+rm ~/memory/.ingest_hashes.json
+```
+
+---
+
+## Direct Discord API Usage
+
+For ingesting specific channels or threads on demand:
 
 ```javascript
-// Daily ingestion of notes (safe to run repeatedly)
-async function dailyMemorySync() {
-  const ingest = new ClawTextIngest();
-  const result = await ingest.ingestAll([
-    {
-      type: 'files',
-      data: ['recent-notes/**/*.md'],
-      metadata: { project: 'daily-sync' }
+import { readFileSync } from 'fs';
+import { createHash } from 'crypto';
+
+const token = JSON.parse(
+  readFileSync('/home/lumadmin/.openclaw/credentials/discord.token.json')
+).token;
+
+async function fetchThread(channelId) {
+  const messages = [];
+  let before = null;
+  
+  while (true) {
+    const url = `https://discord.com/api/v10/channels/${channelId}/messages?limit=100${before ? `&before=${before}` : ''}`;
+    const res = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+    
+    if (res.status === 429) {
+      const data = await res.json();
+      await new Promise(r => setTimeout(r, data.retry_after * 1000 + 200));
+      continue;
     }
-  ]);
-  await ingest.rebuildClusters();
-  return result;
+    
+    const batch = await res.json();
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    messages.push(...batch);
+    before = batch[batch.length - 1].id;
+    if (batch.length < 100) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  
+  // Filter text-only, no attachments
+  return messages.filter(m => m.content?.trim() && !m.attachments?.length);
 }
 ```
 
-## Testing
+---
 
-```bash
-npm test                    # Basic functionality
-npm run test:discord        # Discord adapter tests
-npm run test:discord-cli    # CLI validation tests
-node test-idempotency.mjs   # Deduplication & idempotency
+## Cluster File Format
+
+Each ingested thread produces a `.md` file in `~/memory/clusters/`:
+
+```markdown
+---
+source: discord
+forum: "rgcs-dev"
+thread_id: "1478240533557022730"
+thread_name: "RGCS Smoothing Development v1.2.324"
+message_count: 672
+ingested_at: "2026-03-05T07:19:00.000Z"
+tags: [discord, rgcs-dev]
+---
+
+# RGCS Smoothing Development v1.2.324
+
+**[2026-03-03T04:00] ragesaq:** Starting fresh thread for v1.2.324...
+
+**[2026-03-03T04:01] lumbot:** Confirmed — smoothing coefficients updated...
 ```
+
+Filenames follow the pattern:
+```
+{forum-name}-{thread-id}-{slug}.md
+```
+
+---
+
+## Logs
+
+| File | Contents |
+|------|---------|
+| `~/memory/.ingest-nightly.log` | Nightly ingest run output |
+| `~/memory/.cluster-rebuild.log` | 30-min cluster rebuild output |
+| `~/memory/.ingest-log.jsonl` | Structured JSON log of every ingest run |
+| `~/memory/.ingest_hashes.json` | SHA1 dedup hash store |
+
+Check nightly log:
+```bash
+tail -50 ~/memory/.ingest-nightly.log
+```
+
+Check last ingest run stats:
+```bash
+tail -1 ~/memory/.ingest-log.jsonl | python3 -m json.tool
+```
+
+---
+
+## Current Coverage (March 5, 2026)
+
+| Forum / Channel | Threads | Messages |
+|----------------|---------|----------|
+| `#rgcs-dev` | 6 | ~2,470 |
+| `#ai-projects` | 35 | ~4,300 |
+| `#moltmud-projects` | 15 | ~1,400 |
+| `#general` | 2 | ~4 |
+| `#status` | — (direct) | ~836 |
+| **Total** | **56+** | **~9,000+** |
+
+RAG index: **59 cluster files, 5,879 chunks**
+
+---
 
 ## Troubleshooting
 
-**Error: `clawtext-ingest` not found**
-- Install locally: `npm install -g clawtext-ingest` or use full path: `node bin/ingest.js`
+**Rate limited during ingest:**
+The ingest script handles 429s automatically with backoff. If you see warnings, they're recovered — check the final summary for actual imported count.
 
-**Error: `DISCORD_TOKEN` not set**
-- Set environment variable: `export DISCORD_TOKEN=your_token`
-- Or pass inline: `DISCORD_TOKEN=xxx clawtext-ingest-discord fetch-discord ...`
+**New thread not appearing in RAG:**
+1. Check the thread is in a configured forum channel
+2. Run `ingest-all.mjs` manually — new threads in existing forums are picked up automatically
+3. Run `build-clusters.js` to refresh the index
 
-**Error: Input file not found**
-- Check path and glob patterns: `clawtext-ingest ingest-files --input="docs/**/*.md" -v`
+**Dedup blocking messages it shouldn't:**
+If you believe messages are being incorrectly skipped, check:
+```bash
+cat ~/memory/.ingest_hashes.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{len(d)} hashes stored')"
+```
 
-**Duplicates still imported**
-- Ensure `checkDedupe: true` (default). Delete `.ingest_hashes.json` to reset.
+To force a clean re-ingest of everything:
+```bash
+rm ~/memory/.ingest_hashes.json
+node ~/.openclaw/workspace/scripts/ingest-all.mjs
+```
 
-**Clusters not updating**
-- Run `clawtext-ingest rebuild` or call `ingest.rebuildClusters()`
+**`build-clusters.js` not found:**
+```bash
+ls ~/.openclaw/workspace/hooks/build-clusters.js
+# If missing:
+# Copy from clawtext repo or recreate — see ClawText README
+```
 
-## Documentation
+---
 
-- **[AGENT_GUIDE.md](./AGENT_GUIDE.md)** — Autonomous agent workflows & patterns
-- **[PHASE2_CLI_GUIDE.md](./PHASE2_CLI_GUIDE.md)** — Complete Discord CLI reference
-- **[API_REFERENCE.md](./API_REFERENCE.md)** — Full API documentation
-- **[DISCORD_BOT_SETUP.md](./DISCORD_BOT_SETUP.md)** — Discord bot creation (5 min)
-- **[QUICKSTART.md](./QUICKSTART.md)** — Fast start guide
-- **[CLAWHUB_GUIDE.md](./CLAWHUB_GUIDE.md)** — Publishing to ClawhHub
+## Related
+
+- **[ClawText](../../extensions/clawtext/)** — RAG plugin that consumes the cluster index
+- **[ingest-all.mjs](../scripts/ingest-all.mjs)** — Master ingest script
+- **[build-clusters.js](../hooks/build-clusters.js)** — Cluster index builder
+
+---
 
 ## License
 
 MIT
-
----
-
-**See also:** 
-- [ClawText](https://github.com/ragesaq/clawtext) — RAG layer that consumes memories
-- [ClawhHub](https://clawhub.com) — Skill marketplace
-
