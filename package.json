@@ -9,6 +9,8 @@
   "type": "module",
   "scripts": {
     "test": "node test.mjs",
+    "test:discord": "node test-discord.mjs",
+    "test:discord-integration": "node test-discord-integration.mjs",
     "lint": "eslint src/",
     "prepack": "npm test"
   },
@@ -22,6 +24,7 @@
   "author": "ragesaq",
   "license": "MIT",
   "dependencies": {
+    "discord.js": "^14.25.1",
     "glob": "^10.3.10",
     "yaml": "^2.3.4"
   },
